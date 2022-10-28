@@ -4,7 +4,7 @@ Motivație:
 	Scopul acestui proiect este de a ne ajuta sa intelegem mai bine  notiunile de la baza unui Linux FS. Linux FS suporta multiple sisteme de fisiere(ext2,ext3,ext4,NTFS,etc.). File System-ul pe care urmeaza sa il implementam este bazat pe FAT care sa suporte pana la 128 de fisiere in directorul root. Layout-ul unui File System pe disc este compus din 4 parti logice consecutive si sunt dispuse in urmatoarea ordine: Superblock, FAT, Directorul Root si Blocurile Data.
 	TODO: O diagramă cu cum e imaginea pe disk a FS-ului
 
-	<img src="C:\Users\DRAGOS\Documents\GitHub\PSOP-Simply-Filesystem-\FAT_layout.png" alt="Fat_Layout">
+![FAT Layout](C:\Users\DRAGOS\Documents\GitHub\PSOP-Simply-Filesystem-\FAT_layout.png "FAT Layout")
 	
 Funcționzalități:
 
