@@ -26,9 +26,11 @@ Funcționalități:
 4.	Citirea/Scrierea in fisier: Aceste doua functionatilati sunt cele mai complexe si vor permite citirea/scrierea unui fisier de pe disc.
 
 <b>API:</b>
--fs_mount();
--fs_umount();
--fs_info();
+<b>-fs_mount()</b>: Initializeaza meta data in memorie dupa logica din diagrama de mai sus.
+Functia block_read() ia 2 parametrii,(block_index si memoria pe care dorim sa o citim). Aceasta functie permite programului sa copieze memoria in blocuri care va fi "trimisa" catre memoria RAM pe care am alocat-o. In acest moment, programul este capabil sa foloseasca aceasta memorie pentru a o modifica si executa diverse operatii. Toate aceste operatii sunt executate in memoria RAM(adica nu sunt facute pe discul propriu-zis), astfel ca discul virtual nu va fi actualizat pana cand programul nu va apela functia fs_unmount. 
+<b>-fs_umount()</b>:Dupa ce s-au executat diferite comenzi in memoria pe care am alocat-o, programul trebuie sa scrie toate aceste modificari inapoi pe disc. Trebuie sa ne asiguram ca toate structurile de date au fost eliberate si inchise asa cum trebuie. Ne vom folosi de API, mai exact de block_write() care va lua 2 parametrii(block_index si memoria pe care vrem sa o citim). Ea permite programului sa citeasca din nou memoria in blocurile specificate. Astfel, discul virtaul va fi actualizat cu toate meta-datele necesare.
+Dupa ce scrie pe disc, programul va elibera memoria componentelor logice. 
+-fs_info(): Dupa ce s-a realizat cu succes mount si unmount, programul va fi in stare sa printeze niste informatii deste file system-ul montat. Toate aceste informatii sunt stocate in Superblock. 
 
 
 Arhitectura:
