@@ -20,7 +20,7 @@ typedef enum { false, true } bool;
 /* 
  * Superblock:
  * Offset	Length (bytes)	Description
- * 0x00		8-				Signature (must be equal to "ECS150FS")
+ * 0x00		8-				Signature 
  * 0x08		2-				Total amount of blocks of virtual disk
  * 0x0A		2-				Root directory block index
  * 0x0C		2-				Data block start index
@@ -94,10 +94,7 @@ int fs_mount(const char *diskname) {
 		fs_error( "failure to read from block \n");
 		return -1;
 	}
-	if(strncmp(superblock->signature, "ECS150FS", 8) != 0){
-		fs_error( "invalid disk signature \n");
-		return -1;
-	}
+	
 	if(superblock->num_blocks != block_disk_count()) {
 		fs_error("incorrect block disk count \n");
 		return -1;
