@@ -9,8 +9,8 @@
 #include "fs.h"
 
 
-#define fs_error(fmt) \
-	fprintf(stderr, "%s: ERROR-"fmt"\n")
+#define fs_error(txt) \
+	fprintf(stderr, "%s: ERROR-"txt"\n")
 
 #define EOC 0xFFFF
 #define EMPTY 0
