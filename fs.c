@@ -20,7 +20,7 @@ typedef enum { false, true } bool;
 /* 
  * Superblock:
  * Offset	Length (bytes)	Description
- * 0x00		8-				Signature 
+ * 0x00		8-				Signature (must be equal to "ECS150FS")
  * 0x08		2-				Total amount of blocks of virtual disk
  * 0x0A		2-				Root directory block index
  * 0x0C		2-				Data block start index
@@ -39,6 +39,9 @@ struct superblock_t {
     uint8_t  num_FAT_blocks; 
     uint8_t  unused[4079];
 } __attribute__((packed));
+
+
+
 
 struct FAT_t {
 	uint16_t words;
@@ -150,7 +153,7 @@ int fs_umount(void) {
 	free(root_dir_block);
 	free(FAT_blocks);
 
-	// reset file descriptors
+
     for(int i = 0; i < FS_OPEN_MAX_COUNT; i++) {
 		fd_table[i].offset = 0;
 		fd_table[i].is_used = false;
@@ -171,11 +174,6 @@ int fs_info(void) {
 	printf("rdir_blk=%d\n", superblock->num_FAT_blocks + 1);
 	printf("data_blk=%d\n", superblock->num_FAT_blocks + 2);
 	printf("data_blk_count=%d\n", superblock->num_data_blocks);
-	printf("fat_free_ratio=%d/%d\n", get_num_FAT_free_blocks(), superblock->num_data_blocks);
-	printf("rdir_free_ratio=%d/128\n", count_num_open_dir());
-
 	return 0;
 }
-
-
 
