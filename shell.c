@@ -6,16 +6,13 @@
 #include <errno.h>
 #include <string.h>
 
-static int do_copyin( const char *filename, int inumber );
-static int do_copyout( int inumber, const char *filename );
-
 int main( int argc, char *argv[] )
 {
 	char line[1024];
 	char cmd[1024];
 	char arg1[1024];
 	char arg2[1024];
-	int inumber, result, args;
+	int args,result;
 
 	if(argc!=3) {
 		printf("use: %s <diskfile> <nblocks>\n",argv[0]);
@@ -68,30 +65,13 @@ int main( int argc, char *argv[] )
 				printf("use: debug\n");
 			}
 		} 
-			
-		else if(!strcmp(cmd,"create")) {
-			if(args==1) {
-				inumber = fs_create();
-				/* Bug fixed on April 30th: check for inumber>=0 */
-				if(inumber>=0) {
-					printf("created inode %d\n",inumber);
-				} else {
-					printf("create failed!\n");
-				}
-			} else {
-				printf("use: create\n");
-			}
-		
-		}  else if(!strcmp(cmd,"help")) {
-			printf("Comenzile disponibile sunt:\n");
+		  else if(!strcmp(cmd,"help")) {
+			printf("FS commands:\n");
 			printf("    format\n");
 			printf("    mount\n");
 			printf("    debug\n");
-			printf("    create\n");
 			printf("    help\n");
 			printf("    exit\n");
-		} else if(!strcmp(cmd,"quit")) {
-			break;
 		} else if(!strcmp(cmd,"exit")) {
 			break;
 		} else {
