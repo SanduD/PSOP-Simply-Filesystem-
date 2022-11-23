@@ -1,19 +1,16 @@
+GCC=/usr/bin/gcc
 
-main: main.o libfile_system.a
-	gcc main.o -o main -lfile_system -L .
+simplefs: shell.o fs.o disk.o
+	$(GCC) shell.o fs.o disk.o -o simplefs
 
-libfile_system.a: fs.o disk.o
-	ar rc libfile_system.a fs.o disk.o
+shell.o: shell.c
+	$(GCC) -Wall shell.c -c -o shell.o -g
 
-main.o: main.c
-	gcc -c main.c -o main.o
+fs.o: fs.c fs.h
+	$(GCC) -Wall fs.c -c -o fs.o -g
 
-fs.o:fs.c
-	gcc -c fs.c -o fs.o
-
-disk.o:disk.c
-	gcc -c disk.c -o disk.o
+disk.o: disk.c disk.h
+	$(GCC) -Wall disk.c -c -o disk.o -g
 
 clean:
-	rm *.o *.a main
-	clear
+	rm simplefs disk.o fs.o shell.o

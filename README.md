@@ -1,38 +1,41 @@
 # PSOP-Simply-Filesystem-
 Simple File System Project
 Motivație:
-	Scopul acestui proiect este de a ne ajuta sa intelegem mai bine  notiunile de la baza unui Linux FS. Linux FS suporta multiple sisteme de fisiere(ext2,ext3,ext4,NTFS,etc.). File System-ul pe care urmeaza sa il implementam este bazat pe FAT care sa suporte pana la 128 de fisiere in directorul root. Layout-ul unui File System pe disc este compus din 4 parti logice consecutive si sunt dispuse in urmatoarea ordine: Superblock, FAT, Directorul Root si Blocurile Data.
-	TODO: O diagramă cu cum e imaginea pe disk a FS-ului
+	Scopul acestui proiect este de a ne ajuta sa intelegem mai bine  notiunile de la baza unui Linux FS. \ File System-ul pe care urmeaza sa il implementam este bazat mai mult Unix Inode Layer. SimplyFS are 3 componente majore: shell-ul, filesystem-ul si emulated disk-ul. Noi ne vom ocupa in principiu de filesystem.
 
-![FAT Layout](./FAT_layout.png "FAT Layout")
+![Prezentare](./overview.png "Prezentare")
 
-<b>Superblock</b>: Este primul bloc de pe disk si contine meta-date esentiale despre file system cum ar fi semnatura discului, numarul de blocuri pe care il contine, indexul directorului root de pe disk, indexul blocului de date, cantitatea de FAT si Data blocks.
+In shell userul va introduce comenzile puse la dispozitie de SimpleFS, care vor fi convertite ulterior de catre aplicatia noastra, avand in spate diverse functii care vor fi descrise mai jos. 
+Disk Emulator are toate caracteristicile unui disk real: incarca si stocheaza datele in blocuri, genereaza erori si poate da crash.
 
-<b>File Allocation Table</b>: FAT este situat pe unul sau mai multe blocuri și ține evidența atât a blocurilor de date care nu ocupa memorie, cât și a maparii dintre fișiere și blocurile de date in care se afla conținutul. Acest bloc urmează dupa Superblock și este reprezentat ca un vector de structuri care contine variabile de 16 biti. 
+Fiecare bloc de disc este de 4KB. Primul bloc este SuperBlock-ul, urmat de un numar de blocuri Inode, iar mai apoi Data Block.
+![fs](./fs.png "fs")
 
-<b>Root Directory</b>: Este un bloc de date care urmeaza dupa blocurile FAT si contine o intrare pentru fiecare fisier din FS. El se reprezinta ca o structura de date in care sunt declarate numele de fisiere, dimensiunea si locatia primului bloc de date pentru acest fisier. Din moment ce numarul maxim de fisiere dintr-un director este de 128 de fisiere, root dir este un vector de 128 de structuri.
+<b>Superblock</b>: Este primul bloc de pe disk si contine meta-date esentiale despre file system cum ar fi semnatura discului(magic number-ul), numarul de blocuri pe care il contine, numarul de blocuri care vor stoca inode-urile si numarul total de inoduri. Fiecare camp are 4 bytes.
 
-<b>Data Blocks</b>:Sunt folosite pentru continutul fisierelor. Din moment ce dimensiunea fiecarui disk block virtual este de 4096 bytes, un fisier se poate intinde pe mai mult blocuri(depinde de dimensiunea indicata de propriul offset din FDT). Daca un fisier este mai mic decat dim. unui bloc, o sa ocupe tot acel bloc, indiferent de spatiul suplimentar de pe acel bloc(acest lucru o sa provoace o fragmentare interna pe discul virtual care trebuie retinuta.).
+![Superblock](./super.png "Superblock")
+
+<b>iNode</b>:La fel ca la superblock, fiecare camp are 4 bytes. Isvalid este setat pe unu in cazul in care Inode-ul respectiv este valid, si pe 0 in caz contrar. Size reprezinta dimensiunea logica pe care o ocupa Inodul(in bytes). Tot in aceasta structura vom avea 5 direct pointer si un indirect pointer catre Data Blocks(reprezinta de fapt numarul blocului unde pot fi gasite datele). Fiecare iNode ocupa 32 de bytes, deci un iNode Block poate sa contina maxim 128 de inode-uri. Indirect data block este doar un vector de pointeri directi catre alte blocuri data.
+
+![Inode](./inode.png "Inode")
+
 
 Funcționalități:
 
-1.	<b><i>Mount/Un-mount</b></i>: sistemul de fisiere continut pe discul virtual specificat trebuie sa fie gata pentru a fi folosit. Adica toate componentele acestuia trebuie sa fie initializate sau copiate de pe alt disc virtual cu toate informatiile necesare. Pentru a face asta, blocul API trebuie sa fie gata sa citeasca fiecare bloc in memoria noastra. Pentru fiecare componenta logica programul va aloca spatiul necesar care va oferi cantitatea  de spatiu de care vom avea nevoie cand citim blocurile. In cazul Superblock-ului, desi variabilele care contin informatiile esentiale ale discului nu ocupa o dimensiune echivalenta de memorie ca un bloc de pe discul virtual, structura va contine un extra padding, care va suplimenta spatiul extra care nu este folosit si ii va da structurii dimensiunea de 4096 de bytes. Aceeasi strategie este utilizata si pentru Root Directory.
-	Structura FAT are o abordare similara pentru citirea blocurilor sale in memorie, logica fiind putin modificata, pentru a se potrivi cu dimensiunea variata FAT. Deoarece citim Superblock-ul inaintea FAT-ului, programul este capabil sa cunoasca dimensiunea blocurilor FAT. 
 
-2.	Crearea Fisierelor/Stergerea fisierelor: Permite utilizatorului sa creeze sau sa stearga din fisiere. Pentru a crea un nou fisier, programul va cauta un spatiu liber in directorul root prin verificarea primului byte al unei posibile intrari(daca este 0 atunci vom initializa intrarea cu numele fisierului primit ca argument). Pentru stergerea unui fisier programul se va asigura ca intrarea fisierului este goala si ca tot continutul blocurilor de date detinute de fisier au fost eliberate in FAT.
+1. <b><i>Disk_init/disk_close:</b></i> Inainte de a face orice operatie pe disk, trebuie sa initiem discul. De asta se va ocupa functia disk_init, careia va trebui sa ii specificam numele discului si numarul de blocuri. In momentul in care am terminat cu discul respectiv, va fi apelata functia disk_close.
+2. <b><i>Disk_size:</b></i> Odata ce discul a fost initializat, vom avea nevoie de o functie care sa ne intoarca numarul de blocuri de pe disk. Functiile disk_read(block_number,data) si disk_write() citest si scriu un bloc de date pe disc. In momentul in care dorim sa citim sau sa scriem un disk block care nu exista vom genera un mesaj de eroare.
+3. <b><i>Fs_Debug:</b></i> Scaneaza un mounted filesystem si va afisa diverse detalii:
+-Daca magic number este sau nu valid;
+-Numarul de blocuri de pe disk;
+-Numarul de blocuri  inodes;
+-Numarul total de inoduri;
 
-3.	Operatii cu File Descriptor: FDT este important in gestionarea operatiilor de deschidere si inchidere ale fisierelor. 
+4. <b><i>Fs_mount:</b></i> Va examina discul pentru filesystem. Daca este deja prezent un FS, va citi superblockul, va genera un free block bitmap si va prepara FS pentru a putea fi folosit. Return 1=>succes! 0=>Fail! Mount-ul unui disk este esential pentru ca celelalte functionalitati sa poate fi folosite.
+5. <b><i>Fs_create:</b></i> Va crea un nou inode de lungime 0. Return inode_nr=>succes! Negative_nr=>Fail!
+6. <b><i>Fs_delete:</b></i> Sterge inode-ul dat ca argument. Elibereaza toate datele si indirect blocurile aisgnate acelui inode. Return 1=>succes! 0=>Fail!
 
-4.	Citirea/Scrierea in fisier: Aceste doua functionatilati sunt cele mai complexe si vor permite citirea/scrierea unui fisier de pe disc.
 
-<b>API:</b>
-<b>-fs_mount()</b>: Initializeaza meta data in memorie dupa logica din diagrama de mai sus.
-Functia block_read() ia 2 parametrii,(block_index si memoria pe care dorim sa o citim). Aceasta functie permite programului sa copieze memoria in blocuri care va fi "trimisa" catre memoria RAM pe care am alocat-o. In acest moment, programul este capabil sa foloseasca aceasta memorie pentru a o modifica si executa diverse operatii. Toate aceste operatii sunt executate in memoria RAM(adica nu sunt facute pe discul propriu-zis), astfel ca discul virtual nu va fi actualizat pana cand programul nu va apela functia fs_unmount. 
-
-<b>-fs_umount()</b>:Dupa ce s-au executat diferite comenzi in memoria pe care am alocat-o, programul trebuie sa scrie toate aceste modificari inapoi pe disc. Trebuie sa ne asiguram ca toate structurile de date au fost eliberate si inchise asa cum trebuie. Ne vom folosi de API, mai exact de block_write() care va lua 2 parametrii(block_index si memoria pe care vrem sa o citim). Ea permite programului sa citeasca din nou memoria in blocurile specificate. Astfel, discul virtaul va fi actualizat cu toate meta-datele necesare.
-Dupa ce scrie pe disc, programul va elibera memoria componentelor logice. 
-
--<b>fs_info()</b>: Dupa ce s-a realizat cu succes mount si unmount, programul va fi in stare sa printeze niste informatii deste file system-ul montat. Toate aceste informatii sunt stocate in Superblock. 
 
 
 Arhitectura:
@@ -47,8 +50,8 @@ Testare/Mod de utilizare (TODO 1)
 - ./app /dev/sdb1 ls /
 
 Interactiune de tip bibliotecă
-- ref = myfat_init("/dev/sdb/1);"
-- int fd = myfat_open("/dev/sda", "r");
-- myfat_read(fd, buffer, ...);
+- ref = myfs_init("/dev/sdb/1);"
+- int fd = myfs_open("/dev/sda", "r");
+- myfs_read(fd, buffer, ...);
 
  

@@ -1,164 +1,90 @@
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
 
-#define _UTHREAD_PRIVATE
 #include "disk.h"
 
-#define block_error(txt) \
-	fprintf(stderr, "%s: "txt"\n")
+#define DISK_MAGIC 0xdeadbeef
 
-/* Invalid file descriptor */
-#define INVALID_FD -1
+static FILE *diskfile;
+static int nblocks=0;
+static int nreads=0;
+static int nwrites=0;
 
-/* Disk instance description */
-struct disk {
-	/* File descriptor */
-	int fd;
-	/* Block count */
-	size_t bcount;
-};
-
-/* Currently open virtual disk (invalid by default) */
-static struct disk disk = { .fd = INVALID_FD };
-
-int block_disk_create(const char *diskname, size_t bcount)
+int disk_init( const char *filename, int n )
 {
-	int fd;
+	diskfile = fopen(filename,"r+");
+	if(!diskfile) diskfile = fopen(filename,"w+");
+	if(!diskfile) return 0;
 
-	/* Parameter checking */
-	if (!diskname) {
-		block_error("invalid file diskname");
-		return -1;
-	}
+	ftruncate(fileno(diskfile),n*DISK_BLOCK_SIZE);
 
-	/* Create and open virtual disk file */
-	if ((fd = open(diskname, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) {
-		perror("open");
-		return -1;
-	}
+	nblocks = n;
+	nreads = 0;
+	nwrites = 0;
 
-	/* Fill out the file with (bcount * BLOCK_SIZE) empty bytes */
-	if (ftruncate(fd, bcount * BLOCK_SIZE) < 0) {
-		perror("ftruncate");
-		return -1;
-	}
-
-	close(fd);
-
-	return 0;
+	return 1;
 }
 
-int block_disk_open(const char *diskname)
+int disk_size()
 {
-	int fd;
-	struct stat st;
-
-	/* Parameter checking */
-	if (!diskname) {
-		block_error("invalid file diskname");
-		return -1;
-	}
-
-	if (disk.fd != INVALID_FD) {
-		block_error("disk already open");
-		return -1;
-	}
-
-	if ((fd = open(diskname, O_RDWR, 0644)) < 0) {
-		perror("open");
-		return -1;
-	}
-
-	if (fstat(fd, &st)) {
-		perror("fstat");
-		return -1;
-	}
-
-	if (st.st_size % BLOCK_SIZE != 0) {
-		block_error("size is not multiple of BUF_SIZE");
-		return -1;
-	}
-
-	disk.fd = fd;
-	disk.bcount = st.st_size / BLOCK_SIZE;
-
-	return 0;
+	return nblocks;
 }
 
-int block_disk_close(void)
+static void sanity_check( int blocknum, const void *data )
 {
-	if (disk.fd == INVALID_FD) {
-		block_error("no disk currently open");
-		return -1;
+	if(blocknum<0) {
+		printf("ERROR: blocknum (%d) is negative!\n",blocknum);
+		abort();
 	}
 
-	close(disk.fd);
+	if(blocknum>=nblocks) {
+		printf("ERROR: blocknum (%d) is too big!\n",blocknum);
+		abort();
+	}
 
-	disk.fd = INVALID_FD;
-
-	return 0;
+	if(!data) {
+		printf("ERROR: null data pointer!\n");
+		abort();
+	}
 }
 
-int block_disk_count(void)
+void disk_read( int blocknum, char *data )
 {
-	if (disk.fd == INVALID_FD) {
-		block_error("no disk currently open");
-		return -1;
-	}
+	sanity_check(blocknum,data);
 
-	return disk.bcount;
+	fseek(diskfile,blocknum*DISK_BLOCK_SIZE,SEEK_SET);
+
+	if(fread(data,DISK_BLOCK_SIZE,1,diskfile)==1) {
+		nreads++;
+	} else {
+		printf("ERROR: couldn't access simulated disk: %s\n",strerror(errno));
+		abort();
+	}
 }
 
-int block_write(size_t block, const void *buf)
+void disk_write( int blocknum, const char *data )
 {
-	if (disk.fd == INVALID_FD) {
-		block_error("no disk currently open");
-		return -1;
-	}
+	sanity_check(blocknum,data);
 
-	if (block >= disk.bcount) {
-		block_error("block index out of bounds");
-		return -1;
-	}
+	fseek(diskfile,blocknum*DISK_BLOCK_SIZE,SEEK_SET);
 
-	if (lseek(disk.fd, block * BLOCK_SIZE, SEEK_SET) < 0) {
-		perror("lseek");
-		return -1;
+	if(fwrite(data,DISK_BLOCK_SIZE,1,diskfile)==1) {
+		nwrites++;
+	} else {
+		printf("ERROR: couldn't access simulated disk: %s\n",strerror(errno));
+		abort();
 	}
-
-	if (write(disk.fd, buf, BLOCK_SIZE) < 0) {
-		perror("write");
-		return -1;
-	}
-
-	return 0;
 }
 
-int block_read(size_t block, void *buf)
+void disk_close()
 {
-	if (disk.fd == INVALID_FD) {
-		block_error("no disk currently open");
-		return -1;
+	if(diskfile) {
+		printf("%d disk block reads\n",nreads);
+		printf("%d disk block writes\n",nwrites);
+		fclose(diskfile);
+		diskfile = 0;
 	}
-
-	if (block >= disk.bcount) {
-		block_error("block index out of bounds");
-		return -1;
-	}
-
-	if (lseek(disk.fd, block * BLOCK_SIZE, SEEK_SET) < 0) {
-		perror("lseek");
-		return -1;
-	}
-
-	if (read(disk.fd, buf, BLOCK_SIZE) < 0) {
-		perror("write");
-		return -1;
-	}
-
-	return 0;
 }

@@ -1,176 +1,281 @@
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-
-#define _UTHREAD_PRIVATE
-#include "disk.h"
 #include "fs.h"
+#include "disk.h"
 
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <unistd.h>
+#include <assert.h>
 
-#define fs_error(txt) \
-	fprintf(stderr, "%s: ERROR-"txt"\n")
+#define FS_MAGIC           0xf0f03410
+#define INODES_PER_BLOCK   128 // 64, assume 512 every block;
+#define POINTERS_PER_INODE 5
+#define POINTERS_PER_BLOCK 1024 //128
 
-#define EOC 0xFFFF
-#define EMPTY 0
+/* don't care about config and operation, they are used mixedly*/
+#define FS_CONFIG_SUCCESS 1
+#define FS_CONFIG_FAIL 0
+#define FS_OPERATION_SUCCESS 0
+#define FS_OPERATION_FAIL -1
 
-typedef enum { false, true } bool;
+#define MAX(a,b) ((a) >(b)? (a):(b))
 
-/* 
- * Superblock:
- * Offset	Length (bytes)	Description
- * 0x00		8-				Signature 
- * 0x08		2-				Total amount of blocks of virtual disk
- * 0x0A		2-				Root directory block index
- * 0x0C		2-				Data block start index
- * 0x0E		2				Amount of data blocks
- * 0x10		1				Number of blocks for FAT
- * 0x11		4079			Unused/Padding
- *
- */
+struct fs_superblock {
+	int magic;
+	int nblocks;
+	int ninodeblocks;
+	int ninodes;
+};
 
-struct superblock_t {
-    char     signature[8];
-    uint16_t num_blocks;
-    uint16_t root_dir_index;
-    uint16_t data_start_index;
-    uint16_t num_data_blocks;
-    uint8_t  num_FAT_blocks; 
-    uint8_t  unused[4079];
-} __attribute__((packed));
+struct fs_inode {
+	int isvalid;
+	int size;
+	int direct[POINTERS_PER_INODE];
+	int indirect;
+};
 
-
-
-
-struct FAT_t {
-	uint16_t words;
+union fs_block {
+	struct fs_superblock super;
+	struct fs_inode inode[INODES_PER_BLOCK];
+	int pointers[POINTERS_PER_BLOCK];
+	char data[DISK_BLOCK_SIZE];
 };
 
 
-/* 
- *
- * Root Directory:
- * Offset	Length (bytes)	Description
- * 0x00		16				Filename (including NULL character)
- * 0x10		4				Size of the file (in bytes)
- * 0x14		2				Index of the first data block
- * 0x16		10				Unused/Padding
- *
- */
+struct fs_info{
+	// pre-requisite for operations except for format and debug
+	int mounted;
 
-struct rootdirectory_t {
-	char     filename[FS_FILENAME_LEN];
-	uint32_t file_size;
-	uint16_t start_data_block;
-	uint8_t  unused[10];
-} __attribute__((packed));
+	// bit map
+	int* free_block_bitmap; // 0 -> free
+	int* free_inode_bitmap; // 0 -> free
+	int free_blocks;
+
+	// cache info in super block;
+	int nblocks;
+	int ninodeblocks;
+	int ninodes;
+} FS_INFO = {.mounted = 0};
 
 
-struct file_descriptor_t {
-    bool   is_used;       
-    int    file_index;              
-    size_t offset;  
-	char   file_name[FS_FILENAME_LEN];
-};
+int fs_format()
+{
+	// disable the mounted flag;
+	FS_INFO.mounted = 0;
 
+	union fs_block block;
 
-struct superblock_t      *superblock;
-struct rootdirectory_t   *root_dir_block;
-struct FAT_t             *FAT_blocks;
-struct file_descriptor_t fd_table[FS_OPEN_MAX_COUNT]; 
-
-
-int fs_mount(const char *diskname) {
-
-	superblock = malloc(BLOCK_SIZE);
-
-	if(block_disk_open(diskname) < 0){
-		fs_error("failure to open virtual disk \n");
-		return -1;
-	}
+	disk_read(0, block.data);
 	
-	if(block_read(0, (void*)superblock) < 0){
-		fs_error( "failure to read from block \n");
-		return -1;
+	int nblocks = disk_size();
+	if(nblocks < 2){
+		return FS_CONFIG_FAIL;
 	}
+	block.super.nblocks = nblocks;
+
+	// ninodeblocks =  10 percent of nblocks, rounding up.
+	int ninodeblocks = (nblocks + 9)/10;
+	block.super.ninodeblocks = ninodeblocks;
+	block.super.ninodes = ninodeblocks * INODES_PER_BLOCK;
+	disk_write(0, block.data);
 	
-	if(superblock->num_blocks != block_disk_count()) {
-		fs_error("incorrect block disk count \n");
-		return -1;
+	// set up cached general info;
+	FS_INFO.nblocks = nblocks;
+	FS_INFO.ninodeblocks = ninodeblocks;
+	FS_INFO.ninodes = block.super.ninodes;
+
+	// set inode block, isvalid = 0
+	memset(block.data, 0, DISK_BLOCK_SIZE);
+	for(int i=1; i<=ninodeblocks; i++){
+		disk_write(i, block.data);
 	}
 
-	FAT_blocks = malloc(superblock->num_FAT_blocks * BLOCK_SIZE);
-	for(int i = 0; i < superblock->num_FAT_blocks; i++) {
-		if(block_read(i + 1, (void*)FAT_blocks + (i * BLOCK_SIZE)) < 0) {
-			fs_error("failure to read from block \n");
-			return -1;
+	return FS_CONFIG_SUCCESS;
+}
+
+void fs_debug()
+{
+	union fs_block block;
+
+	disk_read(0,block.data);
+
+	printf("superblock:\n");
+	printf("    %d blocks\n",block.super.nblocks);
+	printf("    %d inode blocks\n",block.super.ninodeblocks);
+	printf("    %d inodes\n",block.super.ninodes);
+
+
+	int ninodeblocks = block.super.ninodeblocks;
+	for(int i=0; i< ninodeblocks; i++){
+		disk_read(i+1, block.data);
+		for(int j=0; j < INODES_PER_BLOCK; j++){
+			// skip the invalid inode;
+			if(!block.inode[j].isvalid) continue;
+
+			struct fs_inode *inode = &block.inode[j]; 
+			int inode_id = i*INODES_PER_BLOCK + j;
+			printf("inode %d:\n", inode_id);
+			printf("    size: %d bytes\n", inode->size);
+			if(!inode->size) continue;
+
+			// output the direct blocks ids
+			int inode_blocks = (inode->size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
+			int k=0;
+			printf("    direct blocks: ");
+			for(; k<POINTERS_PER_INODE && k<inode_blocks; k++){
+				printf("%d ", inode->direct[k]);
+			}
+			printf("\n");
+
+			// output indirect block id and it's inner ids;
+			if(inode_blocks > POINTERS_PER_INODE && inode->indirect){
+				printf("    indirect block: %d\n", inode->indirect);
+				union fs_block indirect_block;
+				disk_read(inode->indirect, indirect_block.data);
+				printf("    indirect data blocks: ");
+				for(; k<inode_blocks; k++){
+					printf("%d ", indirect_block.pointers[k - POINTERS_PER_INODE]);
+				}
+				printf("\n");
+			}
+		}
+	}
+}
+
+int fs_mount()
+{
+	if(FS_INFO.mounted)
+		return FS_CONFIG_SUCCESS;
+
+	union fs_block block;
+	disk_read(0, block.data);
+	int nblocks = block.super.nblocks;
+	int ninodeblocks = block.super.ninodeblocks;
+	int ninodes = block.super.ninodes;
+
+	if(nblocks<2)
+		return FS_CONFIG_FAIL;
+
+	FS_INFO.free_block_bitmap = (int*)calloc(1, nblocks * sizeof(int));
+	FS_INFO.free_inode_bitmap = (int*)calloc(1, ninodes * sizeof(int));
+	FS_INFO.free_blocks = nblocks;
+	// set super block and inode blocks not free
+	for(int i=0; i< 1 + ninodeblocks; i++){
+		FS_INFO.free_block_bitmap[i] = 1;
+		FS_INFO.free_blocks--;
+	}
+
+	// scan the filesystem and mark;
+	for(int i=0; i<ninodeblocks; i++){
+		disk_read(i+1, block.data);
+		for(int j=0; j < INODES_PER_BLOCK; j++){
+			// skip the invalid inode;
+			if(!block.inode[j].isvalid) continue;
+			int inode_id = i*INODES_PER_BLOCK + j;
+			FS_INFO.free_inode_bitmap[inode_id] = 1; // mark the inode;
+			struct fs_inode *inode = &block.inode[j];
+			if(!inode->size) continue;
+
+			// mark the direct blocks ids
+			int inode_blocks = (inode->size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
+			int k=0;
+			for(; k<POINTERS_PER_INODE && k < inode_blocks; k++)
+				FS_INFO.free_block_bitmap[inode->direct[k]] = 1;
+				FS_INFO.free_blocks--;
+
+			// mark indirect block id and it's inner ids;
+			if(inode_blocks > POINTERS_PER_INODE && inode->indirect){
+				FS_INFO.free_block_bitmap[inode->indirect] = 1;
+				FS_INFO.free_blocks--;
+				union fs_block indirect_block;
+				disk_read(inode->indirect, indirect_block.data);
+				for(; k<inode_blocks; k++)
+					FS_INFO.free_block_bitmap[indirect_block.pointers[k - POINTERS_PER_INODE]] = 1;
+					FS_INFO.free_blocks--;
+			}
 		}
 	}
 
-	root_dir_block = malloc(sizeof(struct rootdirectory_t) * FS_FILE_MAX_COUNT);
-	if(block_read(superblock->num_FAT_blocks + 1, (void*)root_dir_block) < 0) { 
-		fs_error("failure to read from block \n");
-		return -1;
+	FS_INFO.mounted = 1;
+	return FS_CONFIG_SUCCESS;
+}
+
+static int check_inode_number(int inumber){
+	if(inumber<0 || inumber >= FS_INFO.ninodes)
+		return FS_CONFIG_SUCCESS;
+	return FS_CONFIG_SUCCESS;
+}
+
+
+static void inode_load( int inumber, struct fs_inode *inode ) { 
+	int block_id = inumber/INODES_PER_BLOCK + 1;
+	int inner_block_inode_id = inumber%INODES_PER_BLOCK;
+
+	union fs_block block;
+	disk_read(block_id, block.data);
+	memcpy(inode, &block.inode[inner_block_inode_id], sizeof(struct fs_inode));
+}
+
+static void inode_save( int inumber, struct fs_inode *inode ) {
+	int block_id = inumber/INODES_PER_BLOCK + 1;
+	int inner_block_inode_id = inumber%INODES_PER_BLOCK;
+
+	union fs_block block;
+	disk_read(block_id, block.data);
+	memcpy(&block.inode[inner_block_inode_id], inode, sizeof(struct fs_inode));
+	disk_write(block_id, block.data);
+}
+
+int fs_create()
+{
+	if(!FS_INFO.mounted)
+		return FS_OPERATION_FAIL;
+
+	for(int i=0; i<FS_INFO.ninodes; i++){
+		// find a free inode;
+		if(FS_INFO.free_inode_bitmap[i]) 
+			continue;
+		
+		FS_INFO.free_inode_bitmap[i] = 1;
+
+		struct fs_inode inode;
+		// if(FS_INFO.ninodes)
+		inode_load(i, &inode);
+		inode.isvalid = 1;
+		inode.size = 0;
+		inode_save(i, &inode);
+		// FS_INFO.ninodes ++;
+
+		return i; // the inode number;
 	}
+	return FS_OPERATION_FAIL;
+}
+
+
+int fs_getsize( int inumber )
+{
+	if(!FS_INFO.mounted)
+		return FS_OPERATION_FAIL;
+
+	if(!check_inode_number(inumber))
+		return FS_OPERATION_FAIL;
 	
-    for(int i = 0; i < FS_OPEN_MAX_COUNT; i++) {
-		fd_table[i].is_used = false;
-	}
-        
-	return 0;
+	if(!FS_INFO.free_inode_bitmap[inumber])
+		return FS_OPERATION_FAIL;
+
+	struct fs_inode inode; 
+	inode_load(inumber, &inode);
+	return inode.size;
 }
 
+static int translate_block(struct fs_inode* inode, int inner_block_id){
+	if(inner_block_id<POINTERS_PER_INODE)
+		return inode->direct[inner_block_id];
 
-int fs_umount(void) {
-
-	if(!superblock){
-		fs_error("No disk available to unmount\n");
-		return -1;
-	}
-
-	if(block_write(0, (void*)superblock) < 0) {
-		fs_error("failure to write to block \n");
-		return -1;
-	}
-
-	for(int i = 0; i < superblock->num_FAT_blocks; i++) {
-		if(block_write(i + 1, (void*)FAT_blocks + (i * BLOCK_SIZE)) < 0) {
-			fs_error("failure to write to block \n");
-			return -1;
-		}
-	}
-
-	if(block_write(superblock->num_FAT_blocks + 1, (void*)root_dir_block) < 0) {
-		fs_error("failure to write to block \n");
-			return -1;
-	}
-
-	free(superblock);
-	free(root_dir_block);
-	free(FAT_blocks);
-
-
-    for(int i = 0; i < FS_OPEN_MAX_COUNT; i++) {
-		fd_table[i].offset = 0;
-		fd_table[i].is_used = false;
-		fd_table[i].file_index = -1;
-		memset(fd_table[i].file_name, 0, FS_FILENAME_LEN);
-    }
-
-	block_disk_close();
-	return 0;
+	assert(inode->indirect!=0);
+	// printf("DEBUG: inode->indirect: %d\n", inode->indirect);
+	union fs_block block;
+	disk_read(inode->indirect, block.data);
+	return block.pointers[inner_block_id - POINTERS_PER_INODE];
 }
-
-
-int fs_info(void) {
-
-	printf("FS Info:\n");
-	printf("total_blk_count=%d\n", superblock->num_blocks);
-	printf("fat_blk_count=%d\n", superblock->num_FAT_blocks);
-	printf("rdir_blk=%d\n", superblock->num_FAT_blocks + 1);
-	printf("data_blk=%d\n", superblock->num_FAT_blocks + 2);
-	printf("data_blk_count=%d\n", superblock->num_data_blocks);
-	return 0;
-}
-
