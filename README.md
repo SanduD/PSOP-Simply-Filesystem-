@@ -1,7 +1,7 @@
 # PSOP-Simply-Filesystem-
 Simple File System Project
 Motivație:
-	Scopul acestui proiect este de a ne ajuta sa intelegem mai bine  notiunile de la baza unui Linux FS. \ File System-ul pe care urmeaza sa il implementam este bazat mai mult Unix Inode Layer. SimplyFS are 3 componente majore: shell-ul, filesystem-ul si emulated disk-ul. Noi ne vom ocupa in principiu de filesystem.
+	Scopul acestui proiect este de a ne ajuta sa intelegem mai bine  notiunile de la baza unui Linux FS. File System-ul pe care urmeaza sa il implementam este bazat mai mult Unix Inode Layer. SimplyFS are 3 componente majore: shell-ul, filesystem-ul si emulated disk-ul. Noi ne vom ocupa in principiu de filesystem.
 
 ![Prezentare](./overview.png "Prezentare")
 
@@ -9,6 +9,7 @@ In shell userul va introduce comenzile puse la dispozitie de SimpleFS, care vor 
 Disk Emulator are toate caracteristicile unui disk real: incarca si stocheaza datele in blocuri, genereaza erori si poate da crash.
 
 Fiecare bloc de disc este de 4KB. Primul bloc este SuperBlock-ul, urmat de un numar de blocuri Inode, iar mai apoi Data Block.
+
 ![fs](./fs.png "fs")
 
 <b>Superblock</b>: Este primul bloc de pe disk si contine meta-date esentiale despre file system cum ar fi semnatura discului(magic number-ul), numarul de blocuri pe care il contine, numarul de blocuri care vor stoca inode-urile si numarul total de inoduri. Fiecare camp are 4 bytes.
