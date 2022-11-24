@@ -8,12 +8,11 @@
 #include <unistd.h>
 #include <assert.h>
 
-#define FS_MAGIC           0xf0f03410
+#define FS_MAGIC           
 #define INODES_PER_BLOCK   128 // 64, assume 512 every block;
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024 //128
 
-/* don't care about config and operation, they are used mixedly*/
 #define FS_CONFIG_SUCCESS 1
 #define FS_CONFIG_FAIL 0
 #define FS_OPERATION_SUCCESS 0
@@ -44,7 +43,6 @@ union fs_block {
 
 
 struct fs_info{
-	// pre-requisite for operations except for format and debug
 	int mounted;
 
 	// bit map
@@ -74,13 +72,14 @@ int fs_format()
 	}
 	block.super.nblocks = nblocks;
 
-	// ninodeblocks =  10 percent of nblocks, rounding up.
+	// ninodeblocks =  10 percent of nblocks
+
 	int ninodeblocks = (nblocks + 9)/10;
 	block.super.ninodeblocks = ninodeblocks;
 	block.super.ninodes = ninodeblocks * INODES_PER_BLOCK;
 	disk_write(0, block.data);
 	
-	// set up cached general info;
+	// set general info;
 	FS_INFO.nblocks = nblocks;
 	FS_INFO.ninodeblocks = ninodeblocks;
 	FS_INFO.ninodes = block.super.ninodes;
@@ -111,13 +110,16 @@ void fs_debug()
 		disk_read(i+1, block.data);
 		for(int j=0; j < INODES_PER_BLOCK; j++){
 			// skip the invalid inode;
-			if(!block.inode[j].isvalid) continue;
+			if(!block.inode[j].isvalid) 
+				continue;
 
 			struct fs_inode *inode = &block.inode[j]; 
 			int inode_id = i*INODES_PER_BLOCK + j;
 			printf("inode %d:\n", inode_id);
 			printf("    size: %d bytes\n", inode->size);
-			if(!inode->size) continue;
+
+			if(!inode->size) 
+				continue;
 
 			// output the direct blocks ids
 			int inode_blocks = (inode->size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
@@ -131,8 +133,10 @@ void fs_debug()
 			// output indirect block id and it's inner ids;
 			if(inode_blocks > POINTERS_PER_INODE && inode->indirect){
 				printf("    indirect block: %d\n", inode->indirect);
+
 				union fs_block indirect_block;
 				disk_read(inode->indirect, indirect_block.data);
+
 				printf("    indirect data blocks: ");
 				for(; k<inode_blocks; k++){
 					printf("%d ", indirect_block.pointers[k - POINTERS_PER_INODE]);
@@ -160,6 +164,7 @@ int fs_mount()
 	FS_INFO.free_block_bitmap = (int*)calloc(1, nblocks * sizeof(int));
 	FS_INFO.free_inode_bitmap = (int*)calloc(1, ninodes * sizeof(int));
 	FS_INFO.free_blocks = nblocks;
+
 	// set super block and inode blocks not free
 	for(int i=0; i< 1 + ninodeblocks; i++){
 		FS_INFO.free_block_bitmap[i] = 1;
@@ -170,34 +175,85 @@ int fs_mount()
 	for(int i=0; i<ninodeblocks; i++){
 		disk_read(i+1, block.data);
 		for(int j=0; j < INODES_PER_BLOCK; j++){
-			// skip the invalid inode;
-			if(!block.inode[j].isvalid) continue;
+
+			if(!block.inode[j].isvalid) 
+				continue;
 			int inode_id = i*INODES_PER_BLOCK + j;
+
 			FS_INFO.free_inode_bitmap[inode_id] = 1; // mark the inode;
 			struct fs_inode *inode = &block.inode[j];
-			if(!inode->size) continue;
+			if(!inode->size) 
+				continue;
 
 			// mark the direct blocks ids
 			int inode_blocks = (inode->size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
-			int k=0;
-			for(; k<POINTERS_PER_INODE && k < inode_blocks; k++)
+			
+			for(int k=0; k<POINTERS_PER_INODE && k < inode_blocks; k++)
+			{
 				FS_INFO.free_block_bitmap[inode->direct[k]] = 1;
 				FS_INFO.free_blocks--;
+			}
+				
 
 			// mark indirect block id and it's inner ids;
 			if(inode_blocks > POINTERS_PER_INODE && inode->indirect){
+
 				FS_INFO.free_block_bitmap[inode->indirect] = 1;
 				FS_INFO.free_blocks--;
 				union fs_block indirect_block;
 				disk_read(inode->indirect, indirect_block.data);
-				for(; k<inode_blocks; k++)
+				for(int k=0; k<inode_blocks; k++)
+				{
 					FS_INFO.free_block_bitmap[indirect_block.pointers[k - POINTERS_PER_INODE]] = 1;
 					FS_INFO.free_blocks--;
+				}
+					
 			}
 		}
 	}
 
 	FS_INFO.mounted = 1;
 	return FS_CONFIG_SUCCESS;
+}
+static void inode_load( int inumber, struct fs_inode *inode ) { 
+	int block_id = inumber/INODES_PER_BLOCK + 1;
+	int inner_block_inode_id = inumber%INODES_PER_BLOCK;
+
+	union fs_block block;
+	disk_read(block_id, block.data);
+	memcpy(inode, &block.inode[inner_block_inode_id], sizeof(struct fs_inode));
+}
+
+static void inode_save( int inumber, struct fs_inode *inode ) {
+	int block_id = inumber/INODES_PER_BLOCK + 1;
+	int inner_block_inode_id = inumber%INODES_PER_BLOCK;
+
+	union fs_block block;
+	disk_read(block_id, block.data);
+	memcpy(&block.inode[inner_block_inode_id], inode, sizeof(struct fs_inode));
+	disk_write(block_id, block.data);
+}
+
+int fs_create()
+{
+	if(!FS_INFO.mounted)
+		return FS_OPERATION_FAIL;
+
+	for(int i=0; i<FS_INFO.ninodes; i++){
+		// find a free inode;
+		if(FS_INFO.free_inode_bitmap[i]) 
+			continue;
+		
+		FS_INFO.free_inode_bitmap[i] = 1;
+
+		struct fs_inode inode;
+		inode_load(i, &inode);
+		inode.isvalid = 1;
+		inode.size = 0;
+		inode_save(i, &inode);
+
+		return i; // the inode number;
+	}
+	return FS_OPERATION_FAIL;
 }
 

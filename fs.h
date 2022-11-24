@@ -3,6 +3,7 @@
 int fs_format();
 void fs_debug();
 int fs_mount();
+int fs_create();
 
 
 #endif

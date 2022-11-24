@@ -12,7 +12,8 @@ int main( int argc, char *argv[] )
 	char cmd[1024];
 	char arg1[1024];
 	char arg2[1024];
-	int args,result;
+	int args,inumber;
+	//int result;
 
 	if(argc!=3) {
 		printf("use: %s <diskfile> <nblocks>\n",argv[0]);
@@ -64,12 +65,25 @@ int main( int argc, char *argv[] )
 			} else {
 				printf("use: debug\n");
 			}
-		} 
+		} else if(!strcmp(cmd,"create")) {
+			if(args==1) {
+				inumber = fs_create();
+				/* Bug fixed on April 30th: check for inumber>=0 */
+				if(inumber>=0) {
+					printf("created inode %d\n",inumber);
+				} else {
+					printf("create failed!\n");
+				}
+			} else {
+				printf("use: create\n");
+			}
+		}
 		  else if(!strcmp(cmd,"help")) {
 			printf("FS commands:\n");
 			printf("    format\n");
 			printf("    mount\n");
 			printf("    debug\n");
+			printf("    create\n");
 			printf("    help\n");
 			printf("    exit\n");
 		} else if(!strcmp(cmd,"exit")) {
@@ -77,7 +91,7 @@ int main( int argc, char *argv[] )
 		} else {
 			printf("unknown command: %s\n",cmd);
 			printf("type 'help' for a list of commands.\n");
-			result = 1;
+			//result = 1;
 		}
 	}
 

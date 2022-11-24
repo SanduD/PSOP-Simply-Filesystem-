@@ -18,6 +18,8 @@ Fiecare bloc de disc este de 4KB. Primul bloc este SuperBlock-ul, urmat de un nu
 
 <b>iNode</b>:La fel ca la superblock, fiecare camp are 4 bytes. Isvalid este setat pe unu in cazul in care Inode-ul respectiv este valid, si pe 0 in caz contrar. Size reprezinta dimensiunea logica pe care o ocupa Inodul(in bytes). Tot in aceasta structura vom avea 5 direct pointer si un indirect pointer catre Data Blocks(reprezinta de fapt numarul blocului unde pot fi gasite datele). Fiecare iNode ocupa 32 de bytes, deci un iNode Block poate sa contina maxim 128 de inode-uri. Indirect data block este doar un vector de pointeri directi catre alte blocuri data.
 
+De asemenea vom mai avea nevoie de un bitmap care va avea valoarea 0 sau 1 daca blockul/inodul este disponibil sau nu. El va fi consultat si actualizat de fiecare data cand FS doreste sa adauge sau sa stearga  un datablock din inode.
+
 ![Inode](./inode.png "Inode")
 
 
