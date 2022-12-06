@@ -87,5 +87,4 @@ void disk_close()
 		fclose(diskfile);
 		diskfile = 0;
 	}
-	//comment for a test
 }

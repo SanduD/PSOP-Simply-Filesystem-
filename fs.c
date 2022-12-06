@@ -257,3 +257,204 @@ int fs_create()
 	return FS_OPERATION_FAIL;
 }
 
+static int check_inode_number(int inumber){
+	if(inumber<0 || inumber >= FS_INFO.ninodes)
+		return FS_CONFIG_SUCCESS;
+	return FS_CONFIG_SUCCESS;
+}
+
+int fs_delete( int inumber )
+{
+	if(!FS_INFO.mounted)
+		return FS_CONFIG_FAIL;
+
+	if(!check_inode_number(inumber))
+		return FS_CONFIG_FAIL;
+	
+	if(!FS_INFO.free_inode_bitmap[inumber])
+		return FS_CONFIG_FAIL;
+
+	FS_INFO.free_inode_bitmap[inumber]	= 0;
+	
+	struct fs_inode inode; 
+	inode_load(inumber, &inode);
+	inode.isvalid = 0;
+	int inode_blocks = (inode.size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
+	
+
+	for(int k=0;k<inode_blocks && k<POINTERS_PER_INODE; k++)
+	{
+		// mark block free
+		FS_INFO.free_block_bitmap[inode.direct[k]] = 0;
+		FS_INFO.free_blocks++;
+		// set direct block 0
+		inode.direct[k] = 0;
+	}
+
+	// free indirect block id and it's inner blocks;
+	if(inode_blocks > POINTERS_PER_INODE && inode.indirect)
+	{
+		union fs_block indirect_block;
+		disk_read(inode.indirect, indirect_block.data);
+
+		for(int k=0; k<inode_blocks; k++)
+		{
+			FS_INFO.free_block_bitmap[indirect_block.pointers[k - POINTERS_PER_INODE]] = 0;
+			FS_INFO.free_blocks++;
+		}
+
+		// mark indirect block free
+		FS_INFO.free_block_bitmap[inode.indirect] = 0;
+		FS_INFO.free_blocks++;
+		// set indrect block 0;
+		inode.indirect = 0;
+	}
+	inode.size = 0;
+	inode_save(inumber, &inode);
+	return FS_CONFIG_SUCCESS;
+}
+
+static int translate_block(struct fs_inode* inode, int inner_block_id){
+	if(inner_block_id<POINTERS_PER_INODE)
+		return inode->direct[inner_block_id];
+
+	assert(inode->indirect!=0);
+	// printf("DEBUG: inode->indirect: %d\n", inode->indirect);
+	union fs_block block;
+	disk_read(inode->indirect, block.data);
+	return block.pointers[inner_block_id - POINTERS_PER_INODE];
+}
+
+static int find_free_block(){
+	for(int i=0; i<FS_INFO.nblocks; i++)
+		if(!FS_INFO.free_block_bitmap[i])
+			return i;
+	return 0;
+}
+
+
+
+int fs_write( int inumber, const char *data, int length, int offset )
+{
+	if(!FS_INFO.mounted)
+		return FS_CONFIG_FAIL;
+
+	if(!check_inode_number(inumber))
+		return FS_CONFIG_FAIL;
+	
+	if(!FS_INFO.free_inode_bitmap[inumber])
+		return FS_CONFIG_FAIL;
+
+	if(length<=0)
+		return 0;
+
+	struct fs_inode inode; 
+	inode_load(inumber, &inode);
+
+	int start = offset;
+	int end = offset + length;
+	// int current_end = inode.size;
+
+	// they are numbers not IDs
+	int exists_block = (inode.size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE; 
+	int all_blocks = (MAX(end, inode.size) + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
+
+	int needed = all_blocks - exists_block;
+
+	if(all_blocks > POINTERS_PER_INODE + POINTERS_PER_BLOCK)
+		return FS_CONFIG_FAIL;
+	
+	if(needed > FS_INFO.free_blocks)
+		return FS_CONFIG_FAIL;
+	// printf("needed:%d, free_blocks:%d\n", needed, FS_INFO.free_blocks);
+
+	/* 
+	* get the blocks once a time 
+	* and save them to inodes
+	* save the inodes;
+	*/
+	if(all_blocks > exists_block){
+		// create the indirect block if necessory;
+		union fs_block* indirect_block = (union fs_block*) calloc(1, sizeof(union fs_block));
+
+		if(exists_block<=POINTERS_PER_INODE && all_blocks > POINTERS_PER_INODE){
+			int block_id = find_free_block();
+			assert(block_id!=0);
+			FS_INFO.free_block_bitmap[block_id] = 1;
+			FS_INFO.free_blocks--;
+			inode.indirect = block_id;
+		}else if(all_blocks > POINTERS_PER_INODE){
+			disk_read(inode.indirect, indirect_block->data);
+		}
+
+		
+
+		// find free blocks;
+		for(int i=0; i<needed; i++){
+			int block_id = find_free_block();
+			assert(block_id!=0);
+			FS_INFO.free_block_bitmap[block_id] = 1;
+			FS_INFO.free_blocks--;
+			// new_blocks[new_blocks_p++] = block_id;
+			int inner_block_id = exists_block + i;
+			if(inner_block_id < POINTERS_PER_INODE){
+				inode.direct[inner_block_id] = block_id;
+			}else{
+				indirect_block->pointers[inner_block_id - POINTERS_PER_INODE] = block_id;
+			}
+		}
+
+		if(all_blocks > POINTERS_PER_INODE)
+			disk_write(inode.indirect, indirect_block->data);
+
+		inode.size = end; // end must lager than original size
+		inode_save(inumber, &inode);
+	}
+
+	int start_block = start / DISK_BLOCK_SIZE;
+	int start_offset = start % DISK_BLOCK_SIZE;
+	int end_block = end  / DISK_BLOCK_SIZE;
+	int end_offset = end % DISK_BLOCK_SIZE;
+
+	union fs_block block;
+	/* if one the same block*/
+	if(start_block == end_block){
+		int block_id = translate_block(&inode, start_block);
+		disk_read(block_id, block.data);
+		memcpy(block.data + start_offset, data, end_offset - start_offset);
+		disk_write(block_id, block.data);
+		return end_offset - start_offset;
+	}
+
+	int write_len = 0;
+
+	/* write the first block */
+	if(start_offset!=0){
+		int block_id = translate_block(&inode, start_block);
+		disk_read(block_id, block.data);
+		memcpy(block.data + start_offset, data, DISK_BLOCK_SIZE - start_offset);
+		disk_write(block_id, block.data);
+		write_len += DISK_BLOCK_SIZE - start_offset;
+	}else{
+		int block_id = translate_block(&inode, start_block);
+		disk_write(block_id, data);
+		write_len += DISK_BLOCK_SIZE;
+	}
+	
+	/* write until all the current blocks runs out */
+	int i;
+	for(i = start_block + 1; i<=end_block; i++){
+		int block_id = translate_block(&inode, i);
+		if(i== end_block && end_offset != 0){ // end_offset == 0 means it's the end 
+			disk_read(block_id, block.data);
+			memcpy(block.data, data + write_len, end_offset);
+			disk_write(block_id, block.data);
+			write_len += end_offset;
+		}else if(i < end_block) {
+			disk_write(block_id, data + write_len);
+			write_len += DISK_BLOCK_SIZE;
+		}
+	}
+
+	return write_len;
+}

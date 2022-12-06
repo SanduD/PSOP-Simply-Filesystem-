@@ -6,6 +6,42 @@
 #include <errno.h>
 #include <string.h>
 
+
+int copyContent( const char *filename, int inumber )
+{
+	FILE *file;
+	int offset=0, result, actual;
+	char buffer[16384];
+
+	file = fopen(filename,"r");
+	if(!file) {
+		printf("couldn't open %s: %s\n",filename,strerror(errno));
+		return 0;
+	}
+
+	while(1) {
+		result = fread(buffer,1,sizeof(buffer),file);
+		if(result<=0) break;
+		if(result>0) {
+			actual = fs_write(inumber,buffer,result,offset);
+			if(actual<0) {
+				printf("ERROR: fs_write return invalid result %d\n",actual);
+				break;
+			}
+			offset += actual;
+			if(actual!=result) {
+				printf("WARNING: fs_write only wrote %d bytes, not %d bytes\n",actual,result);
+				break;
+			}
+		}
+	}
+
+	printf("%d bytes copied\n",offset);
+
+	fclose(file);
+	return 1;
+}
+
 int main( int argc, char *argv[] )
 {
 	char line[1024];
@@ -77,6 +113,32 @@ int main( int argc, char *argv[] )
 			} else {
 				printf("use: create\n");
 			}
+			
+		}
+		else if(!strcmp(cmd,"copyin")) {
+			if(args==3) {
+				inumber = atoi(arg2);
+				if(copyContent(arg1,inumber)) {
+					printf("copied file %s to inode %d\n",arg1,inumber);
+				} else {
+					printf("copy failed!\n");
+				}
+			} else {
+				printf("use: copyin <filename> <inumber>\n");
+			}
+
+		}
+		else if(!strcmp(cmd,"delete")) {
+			if(args==2) {
+				inumber = atoi(arg1);
+				if(fs_delete(inumber)) {
+					printf("inode %d deleted.\n",inumber);
+				} else {
+					printf("delete failed!\n");	
+				}
+			} else {
+				printf("use: delete <inumber>\n");
+			}
 		}
 		  else if(!strcmp(cmd,"help")) {
 			printf("FS commands:\n");
@@ -84,6 +146,8 @@ int main( int argc, char *argv[] )
 			printf("    mount\n");
 			printf("    debug\n");
 			printf("    create\n");
+			printf("    delete  <inode>\n");
+			printf("    copyin  <file> <inode>\n");
 			printf("    help\n");
 			printf("    exit\n");
 		} else if(!strcmp(cmd,"exit")) {
