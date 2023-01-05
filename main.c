@@ -6,7 +6,7 @@
 #include <errno.h>
 #include <string.h>
 
-
+//comment
 int copyContent( const char *filename, int inumber )
 {
 	FILE *file;
