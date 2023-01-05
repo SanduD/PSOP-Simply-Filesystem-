@@ -7,7 +7,7 @@
 #include <string.h>
 
 //comment
-int copyContent( const char *filename, int inumber )
+int copyInContent( const char *filename, int inumber )
 {
 	FILE *file;
 	int offset=0, result, actual;
@@ -41,6 +41,7 @@ int copyContent( const char *filename, int inumber )
 	fclose(file);
 	return 1;
 }
+static int copyOUTContent( int inumber, const char *filename );
 
 int main( int argc, char *argv[] )
 {
@@ -118,7 +119,7 @@ int main( int argc, char *argv[] )
 		else if(!strcmp(cmd,"copyin")) {
 			if(args==3) {
 				inumber = atoi(arg2);
-				if(copyContent(arg1,inumber)) {
+				if(copyInContent(arg1,inumber)) {
 					printf("copied file %s to inode %d\n",arg1,inumber);
 				} else {
 					printf("copy failed!\n");
@@ -140,6 +141,19 @@ int main( int argc, char *argv[] )
 				printf("use: delete <inumber>\n");
 			}
 		}
+		else if(!strcmp(cmd,"copyout")) {
+			if(args==3) {
+				inumber = atoi(arg1);
+				if(copyOUTContent(inumber,arg2)) {
+					printf("copied inode %d to file %s\n",inumber,arg2);
+				} else {
+					printf("copy failed!\n");
+				}
+			} else {
+				printf("use: copyout <inumber> <filename>\n");
+			}
+
+		}
 		  else if(!strcmp(cmd,"help")) {
 			printf("FS commands:\n");
 			printf("    format\n");
@@ -148,6 +162,7 @@ int main( int argc, char *argv[] )
 			printf("    create\n");
 			printf("    delete  <inode>\n");
 			printf("    copyin  <file> <inode>\n");
+			printf("    copyout <inode> <file>\n");
 			printf("    help\n");
 			printf("    exit\n");
 		} else if(!strcmp(cmd,"exit")) {
@@ -163,4 +178,28 @@ int main( int argc, char *argv[] )
 	disk_close();
 
 	return 0;
+}
+static int copyOUTContent( int inumber, const char *filename )
+{
+	FILE *file;
+	int offset=0, result;
+	char buffer[16384];
+
+	file = fopen(filename,"w");
+	if(!file) {
+		printf("couldn't open %s: %s\n",filename,strerror(errno));
+		return 0;
+	}
+
+	while(1) {
+		result = fs_read(inumber,buffer,sizeof(buffer),offset);
+		if(result<=0) break;
+		fwrite(buffer,1,result,file);
+		offset += result;
+	}
+
+	printf("%d bytes copied\n",offset);
+
+	fclose(file);
+	return 1;
 }

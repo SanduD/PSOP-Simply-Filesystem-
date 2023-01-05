@@ -458,3 +458,62 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	return write_len;
 }
+
+int fs_read( int inumber, char *data, int length, int offset )
+{
+	if(!FS_INFO.mounted)
+		return FS_CONFIG_FAIL;
+
+	if(!check_inode_number(inumber))
+		return FS_CONFIG_FAIL;
+	
+	if(!FS_INFO.free_inode_bitmap[inumber])
+		return FS_CONFIG_FAIL;
+
+	if(length<=0)
+		return 0;
+
+	struct fs_inode inode; 
+	inode_load(inumber, &inode);	
+
+	int start = offset;
+	int end = offset + length > inode.size? inode.size: offset + length;
+
+	int start_block = start / DISK_BLOCK_SIZE;
+	int start_offset = start % DISK_BLOCK_SIZE;
+	int end_block = end  / DISK_BLOCK_SIZE;
+	int end_offset = end % DISK_BLOCK_SIZE;
+
+	union fs_block block;
+	if(start_block == end_block){
+		
+		disk_read(translate_block(&inode, start_block), block.data);
+		memcpy(data, block.data + start_offset, end_offset - start_offset);
+		return end_offset - start_offset;
+	}
+
+	int read_len = 0;
+	// read start block
+	if(start_offset!=0){
+		disk_read(translate_block(&inode, start_block), block.data);
+		memcpy(data,  block.data + start_offset, DISK_BLOCK_SIZE - start_offset);
+		read_len += DISK_BLOCK_SIZE - start_offset;
+	}else{
+		disk_read(translate_block(&inode, start_block), data);
+		read_len += DISK_BLOCK_SIZE;
+	}
+
+	// read inner blocks
+	for(int i = start_block + 1; i< end_block; i++){
+		disk_read(translate_block(&inode, i), data + read_len);
+		read_len += DISK_BLOCK_SIZE;
+	}
+
+	// read end block
+	disk_read(translate_block(&inode, end_block), block.data);
+	memcpy(data + read_len,  block.data, end_offset);
+	read_len += end_offset;
+	return read_len;
+	
+
+}
