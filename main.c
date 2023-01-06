@@ -6,7 +6,7 @@
 #include <errno.h>
 #include <string.h>
 
-//comment
+
 int copyInContent( const char *filename, int inumber )
 {
 	FILE *file;
@@ -105,7 +105,7 @@ int main( int argc, char *argv[] )
 		} else if(!strcmp(cmd,"create")) {
 			if(args==1) {
 				inumber = fs_create();
-				/* Bug fixed on April 30th: check for inumber>=0 */
+
 				if(inumber>=0) {
 					printf("created inode %d\n",inumber);
 				} else {
