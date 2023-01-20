@@ -37,24 +37,6 @@ Funcționalități:
 4. <b><i>Fs_mount:</b></i> Va examina discul pentru filesystem. Daca este deja prezent un FS, va citi superblockul, va genera un free block bitmap si va prepara FS pentru a putea fi folosit. Return 1=>succes! 0=>Fail! Mount-ul unui disk este esential pentru ca celelalte functionalitati sa poate fi folosite.
 5. <b><i>Fs_create:</b></i> Va crea un nou inode de lungime 0. Return inode_nr=>succes! Negative_nr=>Fail!
 6. <b><i>Fs_delete:</b></i> Sterge inode-ul dat ca argument. Elibereaza toate datele si indirect blocurile aisgnate acelui inode. Return 1=>succes! 0=>Fail!
-
-
-
-
-Arhitectura:
-- elemente componente
-- module
-- Structuri de date folosite
-
-
-Testare/Mod de utilizare (TODO 1)
-- Interactiunea cu FS se va face prin intermediul unei aplicații
-- ./app <partitie> <comanda> <parametri>
-- ./app /dev/sdb1 ls /
-
-Interactiune de tip bibliotecă
-- ref = myfs_init("/dev/sdb/1);"
-- int fd = myfs_open("/dev/sda", "r");
-- myfs_read(fd, buffer, ...);
-
- 
+7. <b><i>Fs_write</b></i> Functie care permite scrierea de date intr-un fisier specificat prin numarul de inode. Aceasta citeste datele din memorie si le scrie in blocurile de disc specificate de inodul fisierului.  Functia verifica daca exista suficient spatiu pentru a scrie datele si, daca este necesar, aloca si seteaza noi blocuri pentru a stoca datele. De asemenea, functia memoreaza datele in blocurile de date si actualizeaza informatiile despre dimensiunea inode-uli si blocurile utilizate in inode.
+8. <b><i>Fs_read</b></i> Funcția utilizată pentru a citi date dintr-un anumit inode din FS. Funcția va citi datele din fișier și le va copia în buffer-ul specificat, returnând numărul de octeți cititi. Dacă încercarea de a citi date depășește dimensiunea fișierului, funcția va returna numărul de octeți efectiv cititi.
+   
