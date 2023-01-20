@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <assert.h>
 
-#define FS_MAGIC           
+           
 #define INODES_PER_BLOCK   128 // 64, assume 512 every block;
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024 //128
@@ -23,43 +23,48 @@
 struct fs_superblock {
 	int magic;
 	int nblocks;
-	int ninodeblocks;
+	int ninodeblocks;//10%*nblocks
 	int ninodes;
 };
 
 struct fs_inode {
 	int isvalid;
 	int size;
+	//vector care contine pointeri catre blocurile de date ale fisierului
 	int direct[POINTERS_PER_INODE];
+	//variabila care va stoca o locatie fizica de pe disc unde se afla un block de pointeri catre dataBLocks
+	//este initializat in momentul in care am mai mult de POINTERS_PER_INODE in direct[]
 	int indirect;
 };
 
 union fs_block {
 	struct fs_superblock super;
 	struct fs_inode inode[INODES_PER_BLOCK];
+	//variabila care va stoca adresele de blocuri care sunt accesate indirect
 	int pointers[POINTERS_PER_BLOCK];
 	char data[DISK_BLOCK_SIZE];
 };
 
-
 struct fs_info{
 	int mounted;
 
-	// bit map
+	// bit map-ul
+	//bitmap care va tine evidenta blocurilor libere. folosit pt a aloca sau elibera blocuri 
+	//atunci cand se creeaza/sterge un inode
 	int* free_block_bitmap; // 0 -> free
 	int* free_inode_bitmap; // 0 -> free
 	int free_blocks;
 
-	// cache info in super block;
+	
 	int nblocks;
 	int ninodeblocks;
 	int ninodes;
-} FS_INFO = {.mounted = 0};
+} FS_INFO = {.mounted = 0};//initializez variabila statica FS_INFO si seteaza mounted
 
 
 int fs_format()
 {
-	// disable the mounted flag;
+	
 	FS_INFO.mounted = 0;
 
 	union fs_block block;
@@ -72,22 +77,25 @@ int fs_format()
 	}
 	block.super.nblocks = nblocks;
 
-	// ninodeblocks =  10 percent of nblocks
+	// ninodeblocks =  10 %din blocks
 
 	int ninodeblocks = (nblocks + 9)/10;
 	block.super.ninodeblocks = ninodeblocks;
 	block.super.ninodes = ninodeblocks * INODES_PER_BLOCK;
 	disk_write(0, block.data);
 	
-	// set general info;
+	// general info;
 	FS_INFO.nblocks = nblocks;
 	FS_INFO.ninodeblocks = ninodeblocks;
 	FS_INFO.ninodes = block.super.ninodes;
 
-	// set inode block, isvalid = 0
-	memset(block.data, 0, DISK_BLOCK_SIZE);
+	// inode block, isvalid = 0
+	memset(block.data, 0, DISK_BLOCK_SIZE);//setez toate elem din block.data=0
+	
 	for(int i=1; i<=ninodeblocks; i++){
 		disk_write(i, block.data);
+		//initialitez toate inodurile ca fiind invalide, eliberenad astfel orice date vechi
+		//care ar fi putut fi stocate in blocuri
 	}
 
 	return FS_CONFIG_SUCCESS;
@@ -107,30 +115,34 @@ void fs_debug()
 
 	int ninodeblocks = block.super.ninodeblocks;
 	for(int i=0; i< ninodeblocks; i++){
+
 		disk_read(i+1, block.data);
+
 		for(int j=0; j < INODES_PER_BLOCK; j++){
-			// skip the invalid inode;
-			if(!block.inode[j].isvalid) 
+
+			if(!block.inode[j].isvalid) //daca inodul nu este valid sar peste
 				continue;
 
 			struct fs_inode *inode = &block.inode[j]; 
-			int inode_id = i*INODES_PER_BLOCK + j;
+			int inode_id = i*INODES_PER_BLOCK + j;//get inode id
+
 			printf("inode %d:\n", inode_id);
 			printf("    size: %d bytes\n", inode->size);
 
-			if(!inode->size) 
+			if(!inode->size) //daca size==0 sar peste el
 				continue;
 
 			// output the direct blocks ids
 			int inode_blocks = (inode->size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
 			int k=0;
 			printf("    direct blocks: ");
+
 			for(; k<POINTERS_PER_INODE && k<inode_blocks; k++){
 				printf("%d ", inode->direct[k]);
 			}
 			printf("\n");
 
-			// output indirect block id and it's inner ids;
+			
 			if(inode_blocks > POINTERS_PER_INODE && inode->indirect){
 				printf("    indirect block: %d\n", inode->indirect);
 
@@ -171,8 +183,12 @@ int fs_mount()
 		FS_INFO.free_blocks--;
 	}
 
-	// scan the filesystem and mark;
+	// scan the filesystem and mark it;
+	//for in care trebuie sa: marchez in free_inode_bitmap fiecare inode valid ca fiind utilizat
+	//si in free_block_bitmap fiecare block direct si indirect care este utilizat de fiecare inode.
+	//actualizeaza nr liber de locuri disponibile in sisten.
 	for(int i=0; i<ninodeblocks; i++){
+
 		disk_read(i+1, block.data);
 		for(int j=0; j < INODES_PER_BLOCK; j++){
 
@@ -185,9 +201,10 @@ int fs_mount()
 			if(!inode->size) 
 				continue;
 
-			// mark the direct blocks ids
+			//numarul de blocuri de date necesare pentru a stoca date
 			int inode_blocks = (inode->size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
 			
+			//marchez fiecare bloc de date utilizat ca fiind ocupat
 			for(int k=0; k<POINTERS_PER_INODE && k < inode_blocks; k++)
 			{
 				FS_INFO.free_block_bitmap[inode->direct[k]] = 1;
@@ -195,7 +212,8 @@ int fs_mount()
 			}
 				
 
-			// mark indirect block id and it's inner ids;
+			//vf daca exista un block indirect. True=> marchez ca fiind folosit in bitmap
+			//apoi citesc indirect_block de pe disc si marchez fiecare dataBlock ca fiind folosit.
 			if(inode_blocks > POINTERS_PER_INODE && inode->indirect){
 
 				FS_INFO.free_block_bitmap[inode->indirect] = 1;
@@ -215,7 +233,10 @@ int fs_mount()
 	FS_INFO.mounted = 1;
 	return FS_CONFIG_SUCCESS;
 }
-static void inode_load( int inumber, struct fs_inode *inode ) { 
+
+static void inode_load( int inumber, struct fs_inode *inode )
+{
+	// incarc un inode specificat inumber;
 	int block_id = inumber/INODES_PER_BLOCK + 1;
 	int inner_block_inode_id = inumber%INODES_PER_BLOCK;
 
@@ -225,6 +246,7 @@ static void inode_load( int inumber, struct fs_inode *inode ) {
 }
 
 static void inode_save( int inumber, struct fs_inode *inode ) {
+	//salvare inode
 	int block_id = inumber/INODES_PER_BLOCK + 1;
 	int inner_block_inode_id = inumber%INODES_PER_BLOCK;
 
@@ -236,6 +258,7 @@ static void inode_save( int inumber, struct fs_inode *inode ) {
 
 int fs_create()
 {
+	//caut un inode liber si il creez. apoi returnez indexul sau.
 	if(!FS_INFO.mounted)
 		return FS_OPERATION_FAIL;
 
@@ -284,14 +307,14 @@ int fs_delete( int inumber )
 
 	for(int k=0;k<inode_blocks && k<POINTERS_PER_INODE; k++)
 	{
-		// mark block free
+		// marcheaza block free
 		FS_INFO.free_block_bitmap[inode.direct[k]] = 0;
 		FS_INFO.free_blocks++;
 		// set direct block 0
 		inode.direct[k] = 0;
 	}
 
-	// free indirect block id and it's inner blocks;
+	//eliberez spatiul alocat pt blocurile indirecte utilizate 
 	if(inode_blocks > POINTERS_PER_INODE && inode.indirect)
 	{
 		union fs_block indirect_block;
@@ -314,12 +337,14 @@ int fs_delete( int inumber )
 	return FS_CONFIG_SUCCESS;
 }
 
+//pt a obtine nr. blockului corespunzator unui anumit index
 static int translate_block(struct fs_inode* inode, int inner_block_id){
 	if(inner_block_id<POINTERS_PER_INODE)
 		return inode->direct[inner_block_id];
 
-	assert(inode->indirect!=0);
-	// printf("DEBUG: inode->indirect: %d\n", inode->indirect);
+
+	assert(inode->indirect!=0);//ne asiguram ca inodul are un pointer direct setat
+
 	union fs_block block;
 	disk_read(inode->indirect, block.data);
 	return block.pointers[inner_block_id - POINTERS_PER_INODE];
@@ -353,10 +378,10 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	int start = offset;
 	int end = offset + length;
-	// int current_end = inode.size;
 
-	// they are numbers not IDs
+	//nr de blocuri existente in prezent pe disk pt un anumit inode
 	int exists_block = (inode.size + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE; 
+	//nt total de blocuri  necesar
 	int all_blocks = (MAX(end, inode.size) + DISK_BLOCK_SIZE - 1) /DISK_BLOCK_SIZE;
 
 	int needed = all_blocks - exists_block;
@@ -366,15 +391,10 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	
 	if(needed > FS_INFO.free_blocks)
 		return FS_CONFIG_FAIL;
-	// printf("needed:%d, free_blocks:%d\n", needed, FS_INFO.free_blocks);
 
-	/* 
-	* get the blocks once a time 
-	* and save them to inodes
-	* save the inodes;
-	*/
 	if(all_blocks > exists_block){
 		// create the indirect block if necessory;
+		//daca am mai multe blocuri decat exista, va trebui sa fac un indirect pointer
 		union fs_block* indirect_block = (union fs_block*) calloc(1, sizeof(union fs_block));
 
 		if(exists_block<=POINTERS_PER_INODE && all_blocks > POINTERS_PER_INODE){
@@ -386,8 +406,6 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		}else if(all_blocks > POINTERS_PER_INODE){
 			disk_read(inode.indirect, indirect_block->data);
 		}
-
-		
 
 		// find free blocks;
 		for(int i=0; i<needed; i++){
@@ -404,10 +422,11 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			}
 		}
 
+		//daca depasesc dimensiunea, imi va scrie in indirect
 		if(all_blocks > POINTERS_PER_INODE)
 			disk_write(inode.indirect, indirect_block->data);
 
-		inode.size = end; // end must lager than original size
+		inode.size = end; 
 		inode_save(inumber, &inode);
 	}
 
@@ -417,7 +436,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	int end_offset = end % DISK_BLOCK_SIZE;
 
 	union fs_block block;
-	/* if one the same block*/
+	//daca nu mai am mem pe disk
 	if(start_block == end_block){
 		int block_id = translate_block(&inode, start_block);
 		disk_read(block_id, block.data);
@@ -428,10 +447,12 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	int write_len = 0;
 
-	/* write the first block */
+	//scrie primul block
 	if(start_offset!=0){
+
 		int block_id = translate_block(&inode, start_block);
 		disk_read(block_id, block.data);
+		//scrie datele din data in zona de mem specificata. 
 		memcpy(block.data + start_offset, data, DISK_BLOCK_SIZE - start_offset);
 		disk_write(block_id, block.data);
 		write_len += DISK_BLOCK_SIZE - start_offset;
@@ -441,16 +462,20 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		write_len += DISK_BLOCK_SIZE;
 	}
 	
-	/* write until all the current blocks runs out */
+	
 	int i;
+	//
 	for(i = start_block + 1; i<=end_block; i++){
 		int block_id = translate_block(&inode, i);
-		if(i== end_block && end_offset != 0){ // end_offset == 0 means it's the end 
+		if(i== end_block && end_offset != 0){ // end_offset == 0 => sfarsit
+			//sunt pe ultimul block dar nu am cursorul pe end_offset
+			//se citeste blocul si se copiaza doar o parte din datele furnizate in el
 			disk_read(block_id, block.data);
 			memcpy(block.data, data + write_len, end_offset);
 			disk_write(block_id, block.data);
 			write_len += end_offset;
 		}else if(i < end_block) {
+			//daca nu sunt pe ultimul bloc scriu intreg blocul pe disc.
 			disk_write(block_id, data + write_len);
 			write_len += DISK_BLOCK_SIZE;
 		}
@@ -486,14 +511,15 @@ int fs_read( int inumber, char *data, int length, int offset )
 
 	union fs_block block;
 	if(start_block == end_block){
-		
+		//copiez datele dorita in data. 
 		disk_read(translate_block(&inode, start_block), block.data);
 		memcpy(data, block.data + start_offset, end_offset - start_offset);
-		return end_offset - start_offset;
+		return end_offset - start_offset;//returnez cat am reusit sa citesc
+		
 	}
 
 	int read_len = 0;
-	// read start block
+	// read start bloc
 	if(start_offset!=0){
 		disk_read(translate_block(&inode, start_block), block.data);
 		memcpy(data,  block.data + start_offset, DISK_BLOCK_SIZE - start_offset);
